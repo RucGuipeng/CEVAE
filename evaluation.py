@@ -122,3 +122,75 @@ class Full_Metrics(Callback):
         
         if self.verbose > 0: print(out_str)
 
+class metrics_for_cevae(Callback):
+    def __init__(self,data, verbose=0):   
+        super(metrics_for_cevae, self).__init__()
+        self.data=data #feed the callback the full dataset
+        self.verbose=verbose
+
+        #needed for PEHEnn; Called in self.find_ynn
+        self.data['o_idx']=tf.range(self.data['t'].shape[0])
+        self.data['c_idx']=self.data['o_idx'][self.data['t'].squeeze()==0] #These are the indices of the control units
+        self.data['t_idx']=self.data['o_idx'][self.data['t'].squeeze()==1] #These are the indices of the treated units
+        # ['x', 't', 'y', 'mu_0', 'mu_1', 'y_scaler', 'ys', 'o_idx', 'c_idx', 't_idx']
+        self.y = tf.cast(data['y'],tf.float32)
+        self.t = tf.cast(data['t'],tf.float32)
+        self.y_cf = tf.cast(data['ycf'],tf.float32)
+        self.mu0 = tf.cast(data['mu_0'],tf.float32)
+        self.mu1 = tf.cast(data['mu_1'],tf.float32)
+        if self.mu0 is not None and self.mu1 is not None:
+            self.true_ite = self.mu1 - self.mu0
+
+    def rmse_ite(self, ypred1, ypred0):
+        idx1, idx0 = self.t, 1-self.t
+        ite1, ite0 = (self.y - ypred0) * idx1, (ypred1 - self.y)*idx0
+        pred_ite = ite1 + ite0
+        return tf.math.sqrt(tfkb.mean(tf.math.square(self.true_ite - pred_ite)))
+
+    def abs_ate(self, ypred1, ypred0):
+        return tf.math.abs(tfkb.mean(ypred1 - ypred0) - tfkb.mean(self.true_ite))
+
+    def pehe(self, ypred1, ypred0):
+        return tf.math.sqrt(tfkb.mean(tf.math.square((self.mu1 - self.mu0) - (ypred1 - ypred0))))
+
+    def y_errors(self, y0, y1):
+        ypred = (1 - self.t) * y0 + self.t * y1
+        ypred_cf = self.t * y0 + (1 - self.t) * y1
+        return self.y_errors_pcf(ypred, ypred_cf)
+
+    def y_errors_pcf(self, ypred, ypred_cf):
+        rmse_factual = tf.math.sqrt(tfkb.mean(tf.math.square(ypred - self.y)))
+        rmse_cfactual = tf.math.sqrt(tfkb.mean(tf.math.square(ypred_cf - self.y_cf)))
+        return rmse_factual, rmse_cfactual
+
+    def calc_stats(self, ypred1, ypred0):
+        ite = self.rmse_ite(ypred1, ypred0)
+        ate = self.abs_ate(ypred1, ypred0)
+        pehe = self.pehe(ypred1, ypred0)
+        return ite, ate, pehe
+
+    def get_concat_pred(self,pred):
+        ypred0, ypred1 = pred
+        ypred0 = ypred0.sample()
+        ypred1 = ypred1.sample()
+        try:
+            y_pred0,y_pred1 = self.data['y_scaler'].inverse_transform(ypred0),self.data['y_scaler'].inverse_transform(ypred1)
+        except:
+            y_pred0 = self.data['y_scaler'].inverse_transform(tf.expand_dims(ypred0,-1))
+            y_pred1 = self.data['y_scaler'].inverse_transform(tf.expand_dims(ypred1,-1))
+        y_pred0, y_pred1 = tf.squeeze(y_pred0),tf.squeeze(y_pred1)
+        return tf.cast(y_pred0,tf.float32), tf.cast(y_pred1,tf.float32)
+
+    def on_epoch_end(self, epoch, logs={}):
+        pred = self.model(self.data['x'])
+        y_infer = pred[0]
+        ypred0, ypred1 = self.get_concat_pred(y_infer)
+        ite, ate, pehe = self.calc_stats(ypred1, ypred0)
+        tf.summary.scalar("ate", data=tfkb.mean(ypred1 - ypred0), step=epoch)
+        tf.summary.scalar("ite_error", data=ite, step=epoch)
+        tf.summary.scalar("ate_error", data=ate, step=epoch)
+        tf.summary.scalar("pehe_error",data=pehe, step=epoch)
+        
+        out_str=f' — ite: {ite:.4f}  — ate: {ate:.4f} — pehe: {pehe:.4f} '
+        
+        if self.verbose > 0: print(out_str)

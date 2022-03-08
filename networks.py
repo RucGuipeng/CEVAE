@@ -22,7 +22,8 @@ def fc_net(input_shape, layers, out_layers = [], activation = activation_global,
         net.add(tfkl.Dense(
             hidden, 
             activation = activation,
-            kernel_regularizer = tf.keras.regularizers.l2(lamba) 
+            kernel_regularizer = tf.keras.regularizers.l2(lamba),
+            kernel_initializer='RandomNormal',
             )
         )
     if len(out_layers) > 0:
