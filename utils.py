@@ -13,9 +13,8 @@ def fc_net(inp, layers, out_layers, scope, lamba=1e-3, activation=tf.nn.relu, re
                         weights_initializer=weights_initializer,
                         reuse=reuse,
                         weights_regularizer=slim.l2_regularizer(lamba)):
-
         if layers:
-            h = slim.stack(inp, slim.fully_connected, layers, scope=scope)
+            h = (inp, slim.fully_connected, layers, scope=scope)
             if not out_layers:
                 return h
         else:
