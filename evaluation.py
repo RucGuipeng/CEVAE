@@ -142,10 +142,11 @@ class Full_Metrics(Callback):
         # if self.verbose > 0: print(out_str)
 
 class metrics_for_cevae(Callback):
-    def __init__(self,data, verbose=0):   
+    def __init__(self,data,name = 'train', verbose=0):   
         super(metrics_for_cevae, self).__init__()
         self.data=data #feed the callback the full dataset
         self.verbose=verbose
+        self.name = name
 
         #needed for PEHEnn; Called in self.find_ynn
         self.data['o_idx']=tf.range(self.data['t'].shape[0])
@@ -159,17 +160,21 @@ class metrics_for_cevae(Callback):
         self.mu1 = tf.cast(data['mu_1'],tf.float32)
         if self.mu0 is not None and self.mu1 is not None:
             self.true_ite = self.mu1 - self.mu0
-
-    def rmse_ite(self, ypred1, ypred0):
+    def rmse(self, ypred0, ypred1):
         idx1, idx0 = self.t, 1-self.t
-        ite1, ite0 = (self.y - ypred0) * idx1, (ypred1 - self.y)*idx0
-        pred_ite = ite1 + ite0
-        return tf.math.sqrt(tfkb.mean(tf.math.square(self.true_ite - pred_ite)))
+        y_pred = ypred1 * idx1 + ypred0 * idx0
+        rmse = tf.sqrt(tf.reduce_mean(tf.math.square(self.data['y']-y_pred)))
+        return rmse
 
-    def abs_ate(self, ypred1, ypred0):
+    def rmse_ite(self, ypred0, ypred1):
+        pred_ite = ypred1 - ypred0
+        return tf.math.sqrt(tf.reduce_mean(tf.math.square(self.true_ite - pred_ite)))
+
+
+    def abs_ate(self, ypred0, ypred1):
         return tf.math.abs(tfkb.mean(ypred1 - ypred0) - tfkb.mean(self.true_ite))
 
-    def pehe(self, ypred1, ypred0):
+    def pehe(self, ypred0, ypred1):
         return tf.math.sqrt(tfkb.mean(tf.math.square((self.mu1 - self.mu0) - (ypred1 - ypred0))))
 
     def y_errors(self, y0, y1):
@@ -182,11 +187,12 @@ class metrics_for_cevae(Callback):
         rmse_cfactual = tf.math.sqrt(tfkb.mean(tf.math.square(ypred_cf - self.y_cf)))
         return rmse_factual, rmse_cfactual
 
-    def calc_stats(self, ypred1, ypred0):
-        ite = self.rmse_ite(ypred1, ypred0)
-        ate = self.abs_ate(ypred1, ypred0)
-        pehe = self.pehe(ypred1, ypred0)
-        return ite, ate, pehe
+    def calc_stats(self, ypred0, ypred1):
+        rmse = self.rmse(ypred0, ypred1)
+        ite = self.rmse_ite(ypred0, ypred1)
+        ate = self.abs_ate(ypred0, ypred1)
+        pehe = self.pehe(ypred0, ypred1)
+        return rmse,ite, ate, pehe
 
     def get_concat_pred(self,pred):
         ypred0, ypred1 = pred
@@ -204,11 +210,12 @@ class metrics_for_cevae(Callback):
         pred = self.model(self.data['x'])
         y_infer = pred[0]
         ypred0, ypred1 = self.get_concat_pred(y_infer)
-        ite, ate, pehe = self.calc_stats(ypred1, ypred0)
-        tf.summary.scalar("ate", data=tfkb.mean(ypred1 - ypred0), step=epoch)
-        tf.summary.scalar("ite_error", data=ite, step=epoch)
-        tf.summary.scalar("ate_error", data=ate, step=epoch)
-        tf.summary.scalar("pehe_error",data=pehe, step=epoch)
+        rmse, ite, ate, pehe = self.calc_stats(ypred0, ypred1)
+        tf.summary.scalar(f"{self.name}_rmse",      data=rmse,step=epoch)
+        tf.summary.scalar(f"{self.name}_rmse_ite",  data=ite, step=epoch)
+        tf.summary.scalar(f"{self.name}_ate_error", data=ate, step=epoch)
+        tf.summary.scalar(f"{self.name}_pehe_error",data=pehe,step=epoch)
+        tf.summary.scalar(f"{self.name}_ate", data=tfkb.mean(ypred1 - ypred0), step=epoch)
         
         out_str=f' — ite: {ite:.4f}  — ate: {ate:.4f} — pehe: {pehe:.4f} '
         
