@@ -63,10 +63,11 @@ def pdist2sq(A, B):
 
 #https://towardsdatascience.com/implementing-macro-f1-score-in-keras-what-not-to-do-e9f1aa04029d
 class Full_Metrics(Callback):
-    def __init__(self,data, verbose=0):   
+    def __init__(self, data, name, verbose=0):   
         super(Full_Metrics, self).__init__()
         self.data=data #feed the callback the full dataset
         self.verbose=verbose
+        self.name = name
 
         #needed for PEHEnn; Called in self.find_ynn
         self.data['o_idx']=tf.range(self.data['t'].shape[0])
@@ -108,19 +109,37 @@ class Full_Metrics(Callback):
         cate_err=tf.reduce_mean( tf.square( ( (self.data['mu_1']-self.data['mu_0']) - (p['y1_pred']-p['y0_pred']) ) ) )
         return cate_err 
 
+    def RMSE(self,concat_pred):
+        #simulation only
+        p = self.split_pred(concat_pred)
+        idx1, idx0 = self.data['t'], 1-self.data['t']
+        y_pred = p['y1_pred'] * idx1 + p['y0_pred'] * idx0
+        rmse = tf.sqrt(tf.reduce_mean(tf.math.square(self.data['y']-y_pred)))
+        return rmse 
+
+    def RMSE_ite(self, concat_pred):
+        #simulation only
+        p = self.split_pred(concat_pred)
+        idx1, idx0 = self.data['t'], 1-self.data['t']
+        ite_pred = p['y1_pred']-p['y0_pred']
+        ite = self.data['mu_1']-self.data['mu_0']
+        return tf.sqrt(tf.reduce_mean(tf.math.square(ite_pred-ite)))
+
     def on_epoch_end(self, epoch, logs={}):
         concat_pred=self.model.predict(self.data['x'])
         #Calculate Empirical Metrics        
-        ate_pred=tf.reduce_mean(self.ATE(concat_pred)); tf.summary.scalar('ate', data=ate_pred, step=epoch)
-        pehe_nn=self.PEHEnn(concat_pred); tf.summary.scalar('cate_nn_err', data=tf.sqrt(pehe_nn), step=epoch)
+        ate_pred=tf.reduce_mean(self.ATE(concat_pred)); tf.summary.scalar(f'{self.name}_ate', data=ate_pred, step=epoch)
+        pehe_nn=self.PEHEnn(concat_pred); tf.summary.scalar(f'{self.name}_cate_nn_err', data=tf.sqrt(pehe_nn), step=epoch)
         
         #Simulation Metrics
+        rmse = self.RMSE(concat_pred); tf.summary.scalar(f'{self.name}_rmse', data=rmse, step=epoch)
+        rmse_ite = self.RMSE_ite(concat_pred); tf.summary.scalar(f'{self.name}_rmse_ite', data=rmse_ite, step=epoch)
         ate_true=tf.reduce_mean(self.data['mu_1']-self.data['mu_0'])
-        ate_err=tf.abs(ate_true-ate_pred); tf.summary.scalar('ate_err', data=ate_err, step=epoch)
-        pehe =self.PEHE(concat_pred); tf.summary.scalar('cate_err', data=tf.sqrt(pehe), step=epoch)
-        out_str=f' — ate_err: {ate_err:.4f}  — cate_err: {tf.sqrt(pehe):.4f} — cate_nn_err: {tf.sqrt(pehe_nn):.4f} '
+        ate_err=tf.abs(ate_true-ate_pred); tf.summary.scalar(f'{self.name}_ate_err', data=ate_err, step=epoch)
+        pehe =self.PEHE(concat_pred); tf.summary.scalar(f'{self.name}_cate_err', data=tf.sqrt(pehe), step=epoch)
+        out_str=f' - {self.name}_rmse: {rmse:.4f} - {self.name}_rmse_ite:{rmse_ite:.4f} — {self.name}_ate_err: {ate_err:.4f}  — {self.name}_cate_err: {tf.sqrt(pehe):.4f} — {self.name}_cate_nn_err: {tf.sqrt(pehe_nn):.4f} '
         
-        if self.verbose > 0: print(out_str)
+        # if self.verbose > 0: print(out_str)
 
 class metrics_for_cevae(Callback):
     def __init__(self,data, verbose=0):   
